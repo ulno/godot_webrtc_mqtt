@@ -5,7 +5,7 @@ extends Control
 # localname and remotename, topic subscribing and diagrams
 # Make a websocket version of the mqtt, so it can deploy
 # Once press button (then disable it)
-# comment on the flow, and include mosquitto_sub commands
+# comment checked the flow, and include mosquitto_sub commands
 
 var peer = WebRTCPeerConnection.new()
 var datachannel = null
@@ -17,30 +17,33 @@ var otherguytopic = ""
 var my_mqttstatus = ""
 var otherguystatus = ""
 
-var test1k = PoolByteArray()
-var test10k = PoolByteArray()
-var test100k = PoolByteArray()
+var test1k = PackedByteArray()
+var test10k = PackedByteArray()
+var test100k = PackedByteArray()
 
 func syncremoteid(i):
 	$remote_id/OptionButton.selected = 1-$local_id/OptionButton.selected
 
 func updatemqttport():
-	if $mqttbroker/usewebsocket.pressed:
-		$mqttbroker/port.text = str(8081) if $mqttbroker/usessl.pressed else str(8080)
+	if $mqttbroker/usewebsocket.is_pressed():
+		$mqttbroker/port.text = str(8081) if $mqttbroker/usessl.is_pressed() else str(8080)
 	else:
-		$mqttbroker/port.text = str(8883) if $mqttbroker/usessl.pressed else str(1883)
+		$mqttbroker/port.text = str(8883) if $mqttbroker/usessl.is_pressed() else str(1883)
 
+func ord(char_str: String) -> int:
+	return char_str.unicode_at(0)
+	
 func _ready():
-	$remote_id/OptionButton.items = $local_id/OptionButton.items
+	# $remote_id/OptionButton.items = $local_id/OptionButton.items # TODO: what was supposed to happen here?
 	if OS.get_name()=="HTML5":
-		$mqttbroker/usewebsocket.pressed = true
+		$mqttbroker/usewebsocket.button_pressed = true
 		$mqttbroker/usewebsocket.disabled = true
 
 	var tarr1k = Array()
 	randomize()
 	for i in range(1024):
 		tarr1k.append((randi()%26)+ord("a"))
-	test1k = PoolByteArray(tarr1k)
+	test1k = PackedByteArray(tarr1k)
 	for i in range(10):
 		test10k.append_array(test1k)
 	for i in range(10):
@@ -49,23 +52,23 @@ func _ready():
 	test10k[0] = ord('$')
 	test100k[0] = ord('$')
 		
-	$local_id/OptionButton.connect("item_selected", self, "syncremoteid")
-	$mqttbroker/usewebsocket.connect("pressed", self, "updatemqttport")
-	$mqttbroker/usessl.connect("pressed", self, "updatemqttport")
-	$MQTTchat/chatsend.connect("pressed", self, "mqttchatsend")
-	$WebRTCchat/chatsend.connect("pressed", self, "webrtcchatsend")
-	$testlatency/testwebrtc.connect("pressed", self, "testlatency", ["webrtc"])
-	$testlatency/testmqtt.connect("pressed", self, "testlatency", ["mqtt"])
+	$local_id/OptionButton.connect("item_selected",Callable(self,"syncremoteid"))
+	$mqttbroker/usewebsocket.connect("pressed",Callable(self,"updatemqttport"))
+	$mqttbroker/usessl.connect("pressed",Callable(self,"updatemqttport"))
+	$MQTTchat/chatsend.connect("pressed",Callable(self,"mqttchatsend"))
+	$WebRTCchat/chatsend.connect("pressed",Callable(self,"webrtcchatsend"))
+	$testlatency/testwebrtc.connect("pressed",Callable(self,"testlatency").bind("webrtc"))
+	$testlatency/testmqtt.connect("pressed",Callable(self,"testlatency").bind("mqtt"))
 	
 	syncremoteid(0)
 	updatemqttport()
-	$mqttconnect.connect("pressed", self, "mqttconnect")
-	$webrtcconnect.connect("pressed", self, "webrtcconnect")
+	$mqttconnect.connect("pressed",Callable(self,"mqttconnect"))
+	$webrtcconnect.connect("pressed",Callable(self,"webrtcconnect"))
 
 	peer.initialize({"iceServers": [ { "urls": ["stun:stun.l.google.com:19302"] } ] })
 	datachannel = peer.create_data_channel("chat", {"id": 1, "negotiated": true})
-	peer.connect("session_description_created", self, "_session_description_created")
-	peer.connect("ice_candidate_created", self, "_ice_candidate_created")
+	peer.connect("session_description_created",Callable(self,"_session_description_created"))
+	peer.connect("ice_candidate_created",Callable(self,"_ice_candidate_created"))
 
 func texteditappend(textedit, topic, msg=null):
 	var textline = topic
@@ -75,7 +78,7 @@ func texteditappend(textedit, topic, msg=null):
 			textline = textline.substr(0, 40)+"..."
 	textedit.set_line(textedit.get_line_count()-1, textline+"\n")
 	textedit.scroll_vertical = textedit.get_line_count() - 3
-	textedit.update()
+#	textedit.update() # TODO: check if stil necessary in godot 4
 	
 func mqttpublish(topic, msg, retain=false):
 	texteditappend($msg_pub/TextEdit, topic, msg)
@@ -97,7 +100,7 @@ func webrtcchatsend():
 	if $WebRTCchat/chatmsg.text == "" or $WebRTCchat/chatmsg.text == "webrtc-message #%d from %s"%[wmsgn, my_partialtopic]:
 		wmsgn += 1
 		$WebRTCchat/chatmsg.text = "webrtc-message #%d from %s"%[wmsgn, my_partialtopic]
-	var E = datachannel.put_packet($WebRTCchat/chatmsg.text.to_utf8())
+	var E = datachannel.put_packet($WebRTCchat/chatmsg.text.to_utf8_buffer())
 	if E != 0:
 		$WebRTCchat/chatrec.text = "put_packet error: %d" % E
 
@@ -109,7 +112,7 @@ func testlatency(protocol):
 	elif $testlatency/testsize.selected == 2:
 		testbytes = test100k
 	
-	t0startlatency = OS.get_system_time_msecs()
+	t0startlatency = Time.get_ticks_msec()
 	$testlatency/latencyreport.text = "%d"%t0startlatency
 	if protocol == "webrtc":
 		var E = datachannel.put_packet(testbytes)
@@ -121,7 +124,7 @@ func testlatency(protocol):
 
 func alertsamenameerror():
 	$msg_pub/TextEdit.text = "Someone already connected as "+ my_topic+"\n Please restart and change it first"
-	$msg_pub/TextEdit.add_color_override("font_color", Color(1, 0, 0))
+	$msg_pub/TextEdit.add_theme_color_override("font_color", Color(1, 0, 0))
 	$msg_pub/TextEdit.readonly = false
 
 func mqttconnect():
@@ -141,15 +144,15 @@ func mqttconnect():
 	print("My_topic: ", my_topic, " otherguytopic: ", otherguytopic)
 		
 	$mqttnode.set_last_will(my_topic+"status", "stopped", true)
-	$mqttnode.connect("received_message", self, "received_mqtt")
+	$mqttnode.connect("received_message",Callable(self,"received_mqtt"))
 	
-	if $mqttbroker/usewebsocket.pressed:
-		var websocketurl = "%s://%s:%d/mqtt" % ["wss" if $mqttbroker/usessl.pressed else "ws", $mqttbroker/LineEdit.text, int($mqttbroker/port.text)]
-		yield($mqttnode.websocket_connect_to_server(), "completed")
+	if $mqttbroker/usewebsocket.is_pressed():
+		var websocketurl = "%s://%s:%d/mqtt" % ["wss" if $mqttbroker/usessl.is_pressed() else "ws", $mqttbroker/LineEdit.text, $mqttbroker/port.text.to_int()]
+		await $mqttnode.websocket_connect_to_server()
 	else:
 		$mqttnode.server = $mqttbroker/LineEdit.text
-		$mqttnode.port = int($mqttbroker/port.text)
-		yield($mqttnode.connect_to_server($mqttbroker/usessl.pressed), "completed")
+		$mqttnode.port = $mqttbroker/port.text.to_int()
+		await $mqttnode.connect_to_server($mqttbroker/usessl.is_pressed())
 	$mqttbroker/usewebsocket.disabled = true
 	
 	mqttsubscribe(my_topic+"offer")
@@ -161,7 +164,7 @@ func mqttconnect():
 	mqttsubscribe(my_topic+"chat")
 
 	# delay for a second to see if "my" status has already been set as connected by someone else
-	yield(get_tree().create_timer(2.0), "timeout")
+	await get_tree().create_timer(2.0).timeout
 	if my_mqttstatus == "connected":
 		alertsamenameerror()
 	else:
@@ -174,7 +177,7 @@ func webrtcconnect():
 	if not $mqttnode.is_connected_to_server():
 		$remote_sdp/TextEdit.text = "MQTT not connected, so won't work"
 
-func _process(delta):
+func _process(_delta):
 	peer.poll()
 	if datachannel != null and datachannel.get_ready_state() == datachannel.STATE_OPEN:
 		$WebRTCchat/chatsend.disabled = false
@@ -182,9 +185,9 @@ func _process(delta):
 		if datachannel.get_available_packet_count() > 0:
 			var packet = datachannel.get_packet()
 			if packet[0] == ord("$"):
-				var E = datachannel.put_packet(("*%d" % len(packet)).to_ascii())
+				var E = datachannel.put_packet(("*%d" % len(packet)).to_ascii_buffer())
 			elif packet[0] == ord("*"):
-				$testlatency/latencyreport.text = "%dms  %s" % [OS.get_system_time_msecs() - t0startlatency, packet.get_string_from_ascii()]
+				$testlatency/latencyreport.text = "%dms  %s" % [Time.get_ticks_msec() - t0startlatency, packet.get_string_from_ascii()]
 			else:
 				var wmsg = packet.get_string_from_utf8()
 				print("datachannel received: ", wmsg)
@@ -203,7 +206,7 @@ func _session_description_created(type, data):
 func _ice_candidate_created(mid_name, index_name, sdp_name):
 	print("_ice_candidate_created ", [mid_name, index_name, sdp_name])
 	texteditappend($ice_candidates/TextEdit, "Sent: "+mid_name+", "+str(index_name)+", "+sdp_name)
-	mqttpublish(otherguytopic+"ice", to_json([mid_name, index_name, sdp_name]))
+	mqttpublish(otherguytopic+"ice", JSON.new().stringify([mid_name, index_name, sdp_name]))
 
 func received_mqtt(topic, msg):
 	texteditappend($msg_sub/TextEdit, topic, msg)	
@@ -217,7 +220,9 @@ func received_mqtt(topic, msg):
 			$remote_sdp/TextEdit.text = msg
 			peer.set_remote_description("answer", msg)
 		elif stopic[2] == "ice":
-			var js = parse_json(msg)
+			var test_json_conv = JSON.new()
+			test_json_conv.parse(msg)
+			var js = test_json_conv.get_data()
 			texteditappend($ice_candidates/TextEdit, "Rec: "+js[0]+", "+str(js[1])+", "+js[2])
 			var e = peer.add_ice_candidate(js[0], js[1], js[2])
 			print("ICE error:", e)
@@ -237,7 +242,7 @@ func received_mqtt(topic, msg):
 			if msg[0] == "$":
 				$mqttnode.publish(otherguytopic+"chat", "*%d" % len(msg))
 			elif msg[0] == "*":
-				$testlatency/latencyreport.text = "%dms  %s" % [OS.get_system_time_msecs() - t0startlatency, msg]
+				$testlatency/latencyreport.text = "%dms  %s" % [Time.get_ticks_msec() - t0startlatency, msg]
 			else:
 				$MQTTchat/chatrec.text = msg
 			

@@ -2,6 +2,8 @@
 
 ## Introduction
 
+ulno: This updates this project to godot 4
+
 Most computer communication protocols are based on combinations of 
 low-level TCP and UDP connections.  For example, the HTTP protocol is implemented using a single 
 TCP socket that is opened by the client which sends its request up to 
